@@ -1,0 +1,237 @@
+//This is a custom workflow, which is a "on demand process" that runs in the background, and starts when a "task" record is created, and "task" record is updated on Actual Start and Actual End field 
+//This workflow looks at the User Entity, the Task Entity, and our custom entity "Cap_AccruedBenefits" to determines if User has enough vacation time, and then notifies User and Manager if user doesn't have enough hours in the vacation bucket
+
+using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Workflow;
+using System;
+using System.Activities;
+using System.Collections.Generic;
+using System.Linq;
+using System.ServiceModel;
+
+namespace XrmWorkflowLibrary
+{
+    public sealed class VerifyVacation : CodeActivity
+    {
+        [Input("EntityReference input")]
+        [Output("EntityReference output")]
+        [ReferenceTarget("task")]
+        public InOutArgument<EntityReference> Task { get; set; }
+
+        /// <summary>
+        /// Executes the workflow activity.
+        /// </summary>
+        /// <param name="executionContext">The execution context.</param>
+        protected override void Execute(CodeActivityContext executionContext)
+        {
+            // Create the tracing service
+            ITracingService tracingService = executionContext.GetExtension<ITracingService>();
+
+            if (tracingService == null)
+            {
+                throw new InvalidPluginExecutionException("Failed to retrieve tracing service.");
+            }
+
+            tracingService.Trace("Entered VerifyVacation.Execute(), Activity Instance Id: {0}, Workflow Instance Id: {1}",
+                executionContext.ActivityInstanceId,
+                executionContext.WorkflowInstanceId);
+
+            // Create the context
+            IWorkflowContext pluginContext = executionContext.GetExtension<IWorkflowContext>();
+
+            if (pluginContext == null)
+            {
+                throw new InvalidPluginExecutionException("Failed to retrieve workflow context.");
+            }
+
+            IOrganizationServiceFactory serviceFactory = executionContext.GetExtension<IOrganizationServiceFactory>();
+            IOrganizationService service = serviceFactory.CreateOrganizationService(pluginContext.UserId);
+
+            try
+            {
+                //get a reference to the strongly typed classes
+                Microsoft.Xrm.Sdk.Client.OrganizationServiceContext context = new Microsoft.Xrm.Sdk.Client.OrganizationServiceContext(service);
+
+                tracingService.Trace("Service Created");
+
+                //Retrieve the task id
+                Guid taskId = this.Task.Get(executionContext).Id;
+
+                tracingService.Trace("TaskId: " + taskId.ToString());
+
+                //get task details
+                Task taskDetails = (from t in context.CreateQuery<Task>()
+                                    where t.ActivityId.Value == taskId
+                                    select t).FirstOrDefault();
+
+                tracingService.Trace("Got details");
+
+                if (taskDetails != null)
+                {
+                    tracingService.Trace("Getting vacation");
+
+                    if (taskDetails.RegardingObjectId != null && taskDetails.RegardingObjectId.Id == new Guid("6F8DB65A-EF29-E211-AAD4-005056A10043"))
+                    {
+                        //get vacation hours for task owner
+                        cap_AccruedBenefits vacation = (from v in context.CreateQuery<cap_AccruedBenefits>()
+                                                        where v.cap_AccruedBenefitsEmployee.Id == taskDetails.OwnerId.Id
+                                                        && v.cap_AccruedBenefitsInternalTime.Id == new Guid("6F8DB65A-EF29-E211-AAD4-005056A10043") //vacation days (internal time)
+                                                        select v).FirstOrDefault();
+
+                        if (vacation != null)
+                        {
+                            tracingService.Trace("calculations");
+
+                            decimal hoursRemaining = vacation.cap_AccruedBenefitsRemainingHours.Value;
+                            decimal taskHours = taskDetails.ActualDurationMinutes.Value / 60;
+
+                            if (taskHours > hoursRemaining)
+                            {
+                                tracingService.Trace("overage");
+
+                                //get user manager
+                                SystemUser user = (from u in context.CreateQuery<SystemUser>()
+                                                   where u.SystemUserId.Value == taskDetails.OwnerId.Id
+                                                   select u).FirstOrDefault();
+
+                                if (user != null)
+                                {
+                                    tracingService.Trace("user");
+
+                                    SystemUser manager = (from u in context.CreateQuery<SystemUser>()
+                                                          where u.SystemUserId.Value == user.ParentSystemUserId.Id
+                                                          select u).FirstOrDefault();
+
+                                    if (manager != null)
+                                    {
+                                        tracingService.Trace("manager");
+
+                                        string email = manager.InternalEMailAddress;
+
+                                        tracingService.Trace("email");
+
+                                        //send email to manager requesting approval
+                                        CreateEmail(service, user.SystemUserId.Value, manager.SystemUserId.Value, manager.FullName, taskId);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (taskDetails.RegardingObjectId != null && taskDetails.RegardingObjectId.Id == new Guid("AED64AF2-8FC1-E611-80D0-00155DB1872C"))
+                    {
+                        //get holiday hours for task owner
+                        cap_AccruedBenefits Holiday = (from v in context.CreateQuery<cap_AccruedBenefits>()
+                                                       where v.cap_AccruedBenefitsEmployee.Id == taskDetails.OwnerId.Id
+                                                       && v.cap_AccruedBenefitsInternalTime.Id == new Guid("AED64AF2-8FC1-E611-80D0-00155DB1872C") //holiday days (internal time)
+                                                       select v).FirstOrDefault();
+
+                        if (Holiday != null)
+                        {
+                            tracingService.Trace("calculations");
+
+                            decimal hoursRemaining = Holiday.cap_AccruedBenefitsRemainingHours.Value;
+                            decimal taskHours = taskDetails.ActualDurationMinutes.Value / 60;
+
+                            if (taskHours > hoursRemaining)
+                            {
+                                tracingService.Trace("overage");
+
+                                //get user manager
+                                SystemUser user = (from u in context.CreateQuery<SystemUser>()
+                                                   where u.SystemUserId.Value == taskDetails.OwnerId.Id
+                                                   select u).FirstOrDefault();
+
+                                if (user != null)
+                                {
+                                    tracingService.Trace("user");
+
+                                    SystemUser manager = (from u in context.CreateQuery<SystemUser>()
+                                                          where u.SystemUserId.Value == user.ParentSystemUserId.Id
+                                                          select u).FirstOrDefault();
+
+                                    if (manager != null)
+                                    {
+                                        tracingService.Trace("manager");
+
+                                        string email = manager.InternalEMailAddress;
+
+                                        tracingService.Trace("email");
+
+                                        //send email to manager requesting approval
+                                        CreateEmail(service, user.SystemUserId.Value, manager.SystemUserId.Value, manager.FullName, taskId);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (FaultException<OrganizationServiceFault> e)
+            {
+                tracingService.Trace("Exception: {0}", e.ToString());
+
+                // Handle the exception.
+                throw;
+            }
+
+            tracingService.Trace("Exiting RecalculateContractTime.Execute(), Correlation Id: {0}", pluginContext.CorrelationId);
+        }
+
+        public static void CreateEmail(IOrganizationService service, Guid userid, Guid managerId, string managerName, Guid taskId)
+        {
+            // Create Email
+            Email email = new Email();
+
+            // Set the from user of the email to CRM Emailer
+            ActivityParty fromParty = new ActivityParty();
+            fromParty.PartyId = new EntityReference(SystemUser.EntityLogicalName, new Guid("ced1176a-3fd9-e211-b0cd-005056a10043"));
+
+            List<ActivityParty> toPartyList = new List<ActivityParty>();
+
+            // Get all the members of the team to send email
+
+            // Add the Activity party for the team
+            ActivityParty toParty = new ActivityParty();
+            toParty.PartyId = new EntityReference("systemuser", userid);
+
+            ActivityParty userParty = new ActivityParty();
+            userParty.PartyId = new EntityReference("systemuser", managerId);
+
+            ActivityParty HRParty = new ActivityParty();
+            HRParty.PartyId = new EntityReference(SystemUser.EntityLogicalName, new Guid("0bc6de39-c433-e011-ae13-001e4f2d1b93"));
+
+            ActivityParty HRParty2 = new ActivityParty();
+            HRParty2.PartyId = new EntityReference(SystemUser.EntityLogicalName, new Guid("49b52e00-354d-e711-80d6-00155db18642"));
+
+            toPartyList.Add(userParty);
+            toPartyList.Add(toParty);
+            toPartyList.Add(HRParty);
+            toPartyList.Add(HRParty2);
+
+            // Add the subject and description by concating the case ticket number
+            email.Subject = "Vacation Task Needs Manager Approval";
+            email.Description = String.Format("Hello {0}, A task has been created but the user does not have enough hours remaining, please click the following link and use the 'Approve Task' button to approve or reject this task.\n\r <a href='" + "https://crm.capstonetechnology.com/CRM/main.aspx?etn=task&pagetype=entityrecord&id=%7B" + taskId.ToString() + "%7D" + "'>Task Link</a>", managerName);
+            //"https://crm.capstonetechnology.com/main.aspx?etn=task&pagetype=entityrecord&id=%7B" + taskId.ToString() + "%7D"
+
+            // Add To and From users to email
+            email.To = toPartyList.ToArray();
+            email.From = new[] { fromParty };
+
+            // Set the case regarding
+            //email.RegardingObjectId = new EntityReference("task", taskId);
+
+            // Create email
+            Guid emailId = service.Create(email);
+
+            SendEmailRequest sendRequest = new SendEmailRequest();
+            sendRequest.EmailId = emailId;
+            sendRequest.TrackingToken = string.Empty;
+            sendRequest.IssueSend = true;
+
+            // Send the email message.
+            service.Execute(sendRequest);
+        }
+    }
+}

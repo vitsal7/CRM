@@ -1,0 +1,40 @@
+//This web resource JavaScript runs and controls the visibility of a case "re-activate" button in the ribbon. 
+//Retrieves and checks If user has a specific custom security role, and depending on results shows or hides the button from the user.
+
+function HideCaseButton(userRoleId) {
+    //return true;
+    var roleList = Xrm.Page.context.getUserRoles();
+    var isCSRManager = false;
+    for (var i = 0; i < roleList.length; i++) {
+        GetRoleName(roleList[i], function (result) {
+            if (result["name"] == "CSR Case Manager") {
+                isCSRManager = true;
+            }
+        });
+    }
+    return isCSRManager;
+}
+
+function GetRoleName(roleid,successCallback) {
+
+        var req = new XMLHttpRequest();
+        req.open("GET", Xrm.Page.context.getClientUrl() + "/api/data/v8.0/roles(" + roleid + ")?$select=name", false);
+        req.setRequestHeader("OData-MaxVersion", "4.0");
+        req.setRequestHeader("OData-Version", "4.0");
+        req.setRequestHeader("Accept", "application/json");
+        req.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+        req.setRequestHeader("Prefer", "odata.include-annotations=\"*\"");
+        req.onreadystatechange = function () {
+            if (this.readyState === 4) {
+                req.onreadystatechange = null;
+                if (this.status === 200) {
+                    var result = JSON.parse(this.response);
+                    //return result["name"];
+                    successCallback(result);
+                  
+                }
+            }
+        };
+        req.send();
+    
+}
